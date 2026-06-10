@@ -22,6 +22,40 @@ on:
       - ".github/workflows/migrations.yml"
 
 jobs:
+  # A PR that is missing commits from its base branch must not be mergeable:
+  # its lint ran against a stale base, so it can be green while conflicting
+  # with what main has since accepted (e.g. a version number main already
+  # took). Make this a required status check. Note the inherent staleness of
+  # any CI-side guard: if main advances *after* this ran, the old green
+  # result sticks until something re-triggers it — the airtight versions are
+  # the repo settings "require branches to be up to date before merging"
+  # and/or the merge queue (merge_group re-runs everything against the
+  # merged result, so it is skipped there).
+  up-to-date:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if the PR branch is missing commits from the base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # On pull_request events the checked-out HEAD is the synthetic
+          # merge commit, which always contains the base — test the real
+          # PR head instead.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch origin "$BASE_REF"
+          if git merge-base --is-ancestor "origin/$BASE_REF" "$HEAD_SHA"; then
+            echo "PR head contains all commits from origin/$BASE_REF."
+          else
+            echo "::error::This branch is missing the following commits from origin/$BASE_REF — update the branch (merge or rebase) and push again."
+            git log --oneline "$HEAD_SHA..origin/$BASE_REF"
+            exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:

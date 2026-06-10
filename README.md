@@ -93,11 +93,15 @@ topological order.
 
 ### CI (`.github/workflows/migrations.yml`)
 
-Two jobs on `pull_request` **and** `merge_group`:
+Three jobs on `pull_request` **and** `merge_group`:
 
-1. **lint** — full-history checkout, Python 3.12, runs the linter with
+1. **up-to-date** (`pull_request` only) — fails if the PR head is missing
+   commits from the base branch, so a PR linted against a stale base can't
+   merge. Skipped in `merge_group`, where the queue has already rebased the
+   PR onto the merged result.
+2. **lint** — full-history checkout, Python 3.12, runs the linter with
    `--base origin/<base branch>`.
-2. **bootstrap** (`needs: lint`) — `mysql:8.0` service container; installs the
+3. **bootstrap** (`needs: lint`) — `mysql:8.0` service container; installs the
    `migrate` CLI from the golang-migrate release tarball; runs **full up from
    an empty DB → full down → full up again**. The re-bootstrap proves the
    down migrations actually clean up after themselves.
@@ -134,7 +138,13 @@ These must be configured in GitHub settings by an admin:
 1. **Enable merge queue on `main`** (Settings → Branches/Rulesets → require
    merge queue). Without it, `merge_group` never fires and same-version races
    land green.
-2. **Required status checks** on `main`: add both `lint` and `bootstrap`.
+2. **Required status checks** on `main`: add `lint`, `bootstrap`, and
+   `up-to-date`, and enable **"Require branches to be up to date before
+   merging"** (strict status checks). The `up-to-date` job fails any PR whose
+   head is missing commits from the base branch, but a CI check can go stale:
+   if main advances after it ran, the old green result sticks until a new
+   push re-triggers it. The strict setting and the merge queue close that
+   gap at merge time.
 3. **CODEOWNERS enforcement** (require review from code owners): the
    `.github/CODEOWNERS` file in this repo routes `migrations/dag.yaml` (the
    ownership/DAG registry) for mandatory review. Any PR adding a
