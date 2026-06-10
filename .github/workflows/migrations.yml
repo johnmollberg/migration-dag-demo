@@ -1,0 +1,88 @@
+# Migration enforcement.
+#
+# The `merge_group` trigger is load-bearing: with GitHub's merge queue
+# enabled on main, these checks re-run against the *merged* result. That is
+# what catches two PRs that independently claimed the same version number —
+# each is green on its own branch, but the merge-group run of the second one
+# fails the lint's append-only/duplicate checks.
+name: migrations
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "scripts/**"
+      - ".github/workflows/migrations.yml"
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "scripts/**"
+      - ".github/workflows/migrations.yml"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the append-only check can see the base ref
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint dependencies
+        run: pip install pyyaml sqlglot
+
+      - name: Lint migration DAG
+        run: python3 scripts/migrate-lint.py --base "origin/${{ github.base_ref || 'main' }}"
+
+  bootstrap:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: app
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -prootpass"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASS: rootpass
+      DB_NAME: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runner dependencies
+        run: pip install pyyaml sqlglot
+
+      - name: Install migrate CLI
+        run: |
+          curl -fsSL https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz \
+            | tar -xz migrate
+          sudo install -m 0755 migrate /usr/local/bin/migrate
+          migrate -version
+
+      - name: Bootstrap from empty DB (topological order)
+        run: DIRECTION=up scripts/migrate-up.sh
+
+      - name: Full down (reverse topological order)
+        run: DIRECTION=down scripts/migrate-up.sh
+
+      - name: Re-bootstrap (proves down migrations clean up)
+        run: DIRECTION=up scripts/migrate-up.sh

@@ -1,0 +1,50 @@
+# Migration DAG manifest.
+#
+# Each domain owns an independent golang-migrate version sequence (its own
+# directory and its own tracking table, selected at run time via the
+# `x-migrations-table` DSN parameter). `depends_on` edges must form a DAG;
+# scripts/migrate-lint.py enforces this and scripts/migrate-up.sh applies
+# domains in topological order.
+#
+# `owns_tables` is the ownership registry: a domain may run DDL only on
+# tables it owns, and may reference (FK, JOIN, SELECT, ...) only tables
+# owned by itself or by a transitive ancestor in the DAG.
+
+domains:
+  identity:
+    path: migrations/identity
+    tracking_table: schema_migrations_identity
+    depends_on: []
+    owns_tables:
+      - users
+      - user_profiles
+
+  accounts:
+    path: migrations/accounts
+    tracking_table: schema_migrations_accounts
+    depends_on:
+      - identity
+    owns_tables:
+      - accounts
+      - account_balances
+
+  payments:
+    path: migrations/payments
+    tracking_table: schema_migrations_payments
+    depends_on:
+      - identity
+      - accounts
+    owns_tables:
+      - payments
+      - payment_methods
+      - payouts
+
+  ledger:
+    path: migrations/ledger
+    tracking_table: schema_migrations_ledger
+    depends_on:
+      - accounts
+      - payments
+    owns_tables:
+      - ledger_entries
+      - journal_lines

@@ -1,0 +1,6 @@
+# The DAG manifest is the ownership registry — changes to it (and to the
+# enforcement tooling) require owner review. Enable "require review from
+# code owners" in branch protection for this to be enforced.
+/migrations/dag.yaml      @johnmollberg
+/scripts/                 @johnmollberg
+/.github/                 @johnmollberg
